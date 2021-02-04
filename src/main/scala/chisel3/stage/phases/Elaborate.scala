@@ -6,6 +6,7 @@ import java.io.{PrintWriter, StringWriter}
 
 import chisel3.ChiselException
 import chisel3.internal.ErrorLog
+import chisel3.internal.ExceptionHelpers.ThrowableHelpers
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselOptions}
 import firrtl.AnnotationSeq
 import firrtl.options.Viewer.view
@@ -21,8 +22,20 @@ class Elaborate extends Phase {
   override def invalidates(a: Phase) = false
 
   def transform(annotations: AnnotationSeq): AnnotationSeq = annotations.flatMap {
-    case a: ChiselGeneratorAnnotation => a.elaborate
-    case a                            => Some(a)
+    case a: ChiselGeneratorAnnotation => try {
+      a.elaborate
+    } catch {
+      /* if any throwable comes back and we're in "stack trace trimming" mode, then print an error and trim the stack trace
+       */
+      case a: Throwable =>
+        logger.error("Error during elaboration!")
+        if (!view[ChiselOptions](annotations).printFullStackTrace) {
+          logger.error("Stack trace will be trimmed to user code only. Rerun with --full-stacktrace to see the full stack trace")
+          a.trimStackTraceToUserCode()
+        }
+        throw(a)
+    }
+    case a => Some(a)
   }
 
 }
