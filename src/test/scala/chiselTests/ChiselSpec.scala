@@ -94,16 +94,15 @@ class ChiselTestUtilitiesSpec extends ChiselFlatSpec {
   import org.scalatest.exceptions.TestFailedException
   // Who tests the testers?
   "assertKnownWidth" should "error when the expected width is wrong" in {
-    val caught = intercept[ChiselException] {
+    intercept[TestFailedException] {
       assertKnownWidth(7) {
         Wire(UInt(8.W))
       }
     }
-    assert(caught.getCause.isInstanceOf[TestFailedException])
   }
 
   it should "error when the width is unknown" in {
-    a [ChiselException] shouldBe thrownBy {
+    intercept[ChiselException] {
       assertKnownWidth(7) {
         Wire(UInt())
       }
@@ -117,12 +116,11 @@ class ChiselTestUtilitiesSpec extends ChiselFlatSpec {
   }
 
   "assertInferredWidth" should "error if the width is known" in {
-    val caught = intercept[ChiselException] {
+    intercept[TestFailedException] {
       assertInferredWidth(8) {
         Wire(UInt(8.W))
       }
     }
-    assert(caught.getCause.isInstanceOf[TestFailedException])
   }
 
   it should "error if the expected width is wrong" in {

@@ -5,12 +5,58 @@ package chisel3.internal
 import scala.annotation.tailrec
 import scala.collection.mutable.{ArrayBuffer, LinkedHashMap}
 
-class ChiselException(message: String, cause: Throwable = null) extends Exception(message, cause) {
+object ExceptionHelpers {
+
+  /** Packages that are not typically relevant to a Chisel user. */
+  final val packageBlocklist: Set[String] = Set("chisel3", "scala", "java", "jdk", "sun", "sbt")
+
+  /** The object name of Chisel's internal `Builder`. */
+  final val builderName: String = chisel3.internal.Builder.getClass.getName
+
+  /** Utility methods that can be added to exceptions.
+    */
+  implicit class ThrowableHelpers(a: Throwable) {
+
+    /** For an exception, mutably trim a stack trace to user code only.
+      *
+      * This does the following actions to the stack trace:
+      *
+      *   1. From the top, remove elements while the (root) package matches the packageBlocklist
+      *   2. From the bottom, remove elements until the class matches the anchor
+      *   3. From the anchor, remove elements while the (root) package matches the packageBlocklist
+      *
+      * @param packageBlocklist packages that should be removed from the stack trace
+      * @param anchor a class name at which user execution might begin, e.g., Chisel's builder
+      * @return nothing as this mutates the exception directly
+      */
+    def trimStackTraceToUserCode(
+      packageBlocklist: Set[String] = packageBlocklist,
+      anchor: String = builderName
+    ): Unit = {
+      def inBlocklist(ste: StackTraceElement) = {
+        val packageName = ste.getClassName().takeWhile(_ != '.')
+        packageBlocklist.contains(packageName)
+      }
+
+      val trimmedLeft = a.getStackTrace().view.dropWhile(inBlocklist)
+      val trimmedReverse = trimmedLeft.reverse
+        .dropWhile(ste => !ste.getClassName.startsWith(builderName))
+        .dropWhile(inBlocklist)
+      a.setStackTrace(trimmedReverse.reverse.toArray)
+    }
+
+  }
+
+}
+
+class ChiselException(message: String, cause: Throwable = null) extends Exception(message, cause, true, true) {
 
   /** Package names whose stack trace elements should be trimmed when generating a trimmed stack trace */
+  @deprecated("Use ExceptionHelpers.packageBlocklist. This will be removed in Chisel 3.6", "3.5")
   val blacklistPackages: Set[String] = Set("chisel3", "scala", "java", "sun", "sbt")
 
   /** The object name of Chisel's internal `Builder`. Everything stack trace element after this will be trimmed. */
+  @deprecated("Use ExceptionHelpers.builderName. This will be removed in Chisel 3.6", "3.5")
   val builderName: String = chisel3.internal.Builder.getClass.getName
 
   /** Examine a [[Throwable]], to extract all its causes. Innermost cause is first.
@@ -27,7 +73,7 @@ class ChiselException(message: String, cause: Throwable = null) extends Exceptio
   /** Returns true if an exception contains  */
   private def containsBuilder(throwable: Throwable): Boolean =
     throwable.getStackTrace().collectFirst {
-      case ste if ste.getClassName().startsWith(builderName) => throwable
+      case ste if ste.getClassName().startsWith(ExceptionHelpers.builderName) => throwable
     }.isDefined
 
   /** Examine this [[ChiselException]] and it's causes for the first [[Throwable]] that contains a stack trace including
@@ -142,7 +188,8 @@ private[chisel3] class ErrorLog {
     }
 
     if (!allErrors.isEmpty) {
-      throwException("Fatal errors during hardware elaboration")
+      throw new ChiselException("Fatal errors during hardware elaboration. Look above for error list.")
+          with scala.util.control.NoStackTrace
     } else {
       // No fatal errors, clear accumulated warnings since they've been reported
       errors.clear()
