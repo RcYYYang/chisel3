@@ -7,42 +7,54 @@ import scala.collection.mutable.{ArrayBuffer, LinkedHashMap}
 
 object ExceptionHelpers {
 
-  /** Packages that are not typically relevant to a Chisel user. */
-  final val packageBlocklist: Set[String] = Set("chisel3", "scala", "java", "jdk", "sun", "sbt")
+  /** Root packages that are not typically relevant to Chisel user code. */
+  final val packageTrimlist: Set[String] = Set("chisel3", "scala", "java", "jdk", "sun", "sbt")
 
   /** The object name of Chisel's internal `Builder`. */
   final val builderName: String = chisel3.internal.Builder.getClass.getName
 
   /** Utility methods that can be added to exceptions.
     */
-  implicit class ThrowableHelpers(a: Throwable) {
+  implicit class ThrowableHelpers(throwable: Throwable) {
 
     /** For an exception, mutably trim a stack trace to user code only.
       *
       * This does the following actions to the stack trace:
       *
-      *   1. From the top, remove elements while the (root) package matches the packageBlocklist
-      *   2. From the bottom, remove elements until the class matches the anchor
-      *   3. From the anchor, remove elements while the (root) package matches the packageBlocklist
+      *   1. From the top, remove elements while the (root) package matches the packageTrimlist
+      *   2. Optionally, from the bottom, remove elements until the class matches an anchor
+      *   3. From the anchor (or the bottom), remove elements while the (root) package matches the packageTrimlist
       *
-      * @param packageBlocklist packages that should be removed from the stack trace
-      * @param anchor a class name at which user execution might begin, e.g., Chisel's builder
+      * @param packageTrimlist packages that should be removed from the stack trace
+      * @param anchor an optional class name at which user execution might begin, e.g., a main object
       * @return nothing as this mutates the exception directly
       */
     def trimStackTraceToUserCode(
-      packageBlocklist: Set[String] = packageBlocklist,
-      anchor: String = builderName
+      packageTrimlist: Set[String] = packageTrimlist,
+      anchor: Option[String] = Some(builderName)
     ): Unit = {
-      def inBlocklist(ste: StackTraceElement) = {
+      def inTrimlist(ste: StackTraceElement) = {
         val packageName = ste.getClassName().takeWhile(_ != '.')
-        packageBlocklist.contains(packageName)
+        packageTrimlist.contains(packageName)
       }
 
-      val trimmedLeft = a.getStackTrace().view.dropWhile(inBlocklist)
-      val trimmedReverse = trimmedLeft.reverse
-        .dropWhile(ste => !ste.getClassName.startsWith(builderName))
-        .dropWhile(inBlocklist)
-      a.setStackTrace(trimmedReverse.reverse.toArray)
+      // Step 1: Remove elements from the top in the package trimlist
+      ((a: Array[StackTraceElement]) => a.view.dropWhile(inTrimlist))
+      // Step 2: Optionally remove elements from the bottom until the anchor
+        .andThen(_.reverse)
+        .andThen( a =>
+          anchor match {
+            case Some(b) => a.dropWhile(ste => !ste.getClassName.startsWith(b))
+            case None    => a
+          }
+        )
+      // Step 3: Remove elements from the bottom in the package trimlist
+        .andThen(_.dropWhile(inTrimlist))
+      // Step 4: Reverse back to the original order
+        .andThen(_.reverse.toArray)
+      // Step 5: Mutate the stack trace in this exception
+        .andThen(throwable.setStackTrace(_))
+        .apply(throwable.getStackTrace)
     }
 
   }
@@ -52,7 +64,7 @@ object ExceptionHelpers {
 class ChiselException(message: String, cause: Throwable = null) extends Exception(message, cause, true, true) {
 
   /** Package names whose stack trace elements should be trimmed when generating a trimmed stack trace */
-  @deprecated("Use ExceptionHelpers.packageBlocklist. This will be removed in Chisel 3.6", "3.5")
+  @deprecated("Use ExceptionHelpers.packageTrimlist. This will be removed in Chisel 3.6", "3.5")
   val blacklistPackages: Set[String] = Set("chisel3", "scala", "java", "sun", "sbt")
 
   /** The object name of Chisel's internal `Builder`. Everything stack trace element after this will be trimmed. */
